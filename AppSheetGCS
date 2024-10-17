@@ -1,0 +1,143 @@
+// Función para leer el archivo JSON desde Google Drive
+function getServiceAccountJSON() {
+  var fileId = 'PON_AQUI_EL_ID_DEL_ARCHIVO_JSON';  // Reemplaza este valor con el ID del archivo JSON de la cuenta de servicio subido a Google Drive
+  var file = DriveApp.getFileById(fileId);
+  var jsonString = file.getBlob().getDataAsString();
+  return JSON.parse(jsonString);
+}
+
+// Función principal para listar archivos desde Google Cloud Storage y guardarlos en la hoja de cálculo
+function listFilesFromGCS() {
+  var bucketName = 'PON_AQUI_EL_NOMBRE_DE_TU_BUCKET';  // Reemplaza este valor con el nombre de tu bucket de Google Cloud Storage
+  
+  // Leer el archivo JSON de la cuenta de servicio
+  var serviceAccount = getServiceAccountJSON();
+  var privateKey = serviceAccount.private_key;
+  var clientEmail = serviceAccount.client_email;
+  
+  // Configuración del servicio OAuth2
+  var token = getAccessToken(clientEmail, privateKey);
+  
+  var url = 'https://storage.googleapis.com/storage/v1/b/' + bucketName + '/o';
+  var options = {
+    'method': 'get',
+    'headers': {
+      'Authorization': 'Bearer ' + token
+    },
+    'muteHttpExceptions': true
+  };
+
+  // Realizar la petición para listar archivos
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    var httpStatus = response.getResponseCode();
+    
+    if (httpStatus === 200) {
+      var data = JSON.parse(response.getContentText());
+
+      // Si se encuentran archivos, guardar en la hoja de cálculo
+      if (data.items && data.items.length > 0) {
+        // Crear el array fileData con los archivos, sus URLs, extensiones, tamaños, timestamps y metadatos
+        var fileData = data.items.map(function(item) {
+          var fileName = item.name;
+          var fileUrl = 'https://storage.cloud.google.com/' + bucketName + '/' + fileName;  // URL de archivo
+          
+          // Extraer la extensión del archivo (si existe)
+          var fileExtension = fileName.includes('.') ? fileName.split('.').pop() : 'sin extensión';
+          
+          // Extraer el tamaño del archivo (en bytes)
+          var fileSize = item.size ? item.size + " bytes" : 'desconocido';
+
+          // Extraer la fecha de modificación (timestamp)
+          var fileTimestamp = item.updated ? new Date(item.updated).toLocaleString() : 'sin timestamp';
+
+          // Extraer metadatos (si están disponibles)
+          var metadata = item.metadata ? JSON.stringify(item.metadata) : 'sin metadatos';
+
+          return { 
+            name: fileName, 
+            url: fileUrl, 
+            extension: fileExtension, 
+            size: fileSize, 
+            timestamp: fileTimestamp, 
+            metadata: metadata 
+          };
+        });
+        // Guardar los archivos en la hoja de cálculo
+        saveFilesToSheet(fileData);  
+      } else {
+        Logger.log("No se encontraron archivos en el bucket.");
+      }
+    } else {
+      Logger.log("Error al acceder al bucket. Código HTTP: " + httpStatus);
+      Logger.log("Detalles de error: " + response.getContentText());
+    }
+  } catch (e) {
+    Logger.log('Error al hacer la solicitud: ' + e.message);
+  }
+}
+
+// Rutina para guardar los archivos en la hoja de cálculo
+function saveFilesToSheet(fileData) {
+  // ID de la hoja de cálculo
+  var spreadsheetId = 'PON_AQUI_EL_ID_DE_LA_HOJA_DE_CALCULO';  // Reemplaza con el ID de la hoja de cálculo
+  
+  // Abrir la hoja de cálculo y acceder a la pestaña llamada "docs"
+  var spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  var sheet = spreadsheet.getSheetByName("docs");
+  
+  // Si la pestaña "docs" no existe, crearla
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("docs");
+  }
+
+  // Limpiar la hoja antes de agregar nuevos datos
+  sheet.clear();
+
+  // Agregar encabezado a la hoja de cálculo
+  sheet.appendRow(["Nombre del Archivo", "URL del Archivo", "Extensión", "Tamaño", "Timestamp", "Metadatos"]);
+  
+  // Iterar sobre el archivo listado en GCS y agregar cada uno a la hoja de cálculo
+  fileData.forEach(function(file) {
+    sheet.appendRow([file.name, file.url, file.extension, file.size, file.timestamp, file.metadata]);
+  });
+  
+  Logger.log("Archivos guardados en la hoja de cálculo correctamente.");
+}
+
+// Función para obtener el token de acceso OAuth2 usando la cuenta de servicio
+function getAccessToken(clientEmail, privateKey) {
+  var tokenUrl = 'https://oauth2.googleapis.com/token';
+  var claimSet = {
+    'iss': clientEmail,
+    'scope': 'https://www.googleapis.com/auth/cloud-platform',
+    'aud': tokenUrl,
+    'exp': Math.floor((Date.now() + 3600000) / 1000),  // 1 hora en el futuro
+    'iat': Math.floor(Date.now() / 1000)
+  };
+  
+  var header = {
+    'alg': 'RS256',
+    'typ': 'JWT'
+  };
+  
+  var jwt = Utilities.base64EncodeWebSafe(JSON.stringify(header)) + '.' +
+            Utilities.base64EncodeWebSafe(JSON.stringify(claimSet));
+  
+  var signature = Utilities.computeRsaSha256Signature(jwt, privateKey);
+  var signedJwt = jwt + '.' + Utilities.base64EncodeWebSafe(signature);
+  
+  var payload = {
+    'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+    'assertion': signedJwt
+  };
+  
+  var options = {
+    'method': 'post',
+    'payload': payload
+  };
+  
+  var response = UrlFetchApp.fetch(tokenUrl, options);
+  var tokenData = JSON.parse(response.getContentText());
+  return tokenData.access_token;
+}
