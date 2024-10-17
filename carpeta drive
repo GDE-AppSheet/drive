@@ -1,0 +1,20 @@
+function createSimpleFolderWithDate() {
+  // Obtener la fecha actual y formatearla a dd-mm-yyyy
+  const today = new Date();
+  const formattedDate = Utilities.formatDate(today, Session.getScriptTimeZone(), 'dd-MM-yyyy');
+  
+  // Nombre de la carpeta con la fecha de creación
+  const folderName = `Nueva Carpeta - ${formattedDate}`;
+
+  // ID de la carpeta padre donde se creará la nueva carpeta
+  const parentFolderId = 'ID_DE_TU_CARPETA_PADRE';  // Cambia esto por el ID de tu carpeta padre
+  
+  // Obtener la carpeta padre usando el ID
+  const parentFolder = DriveApp.getFolderById(parentFolderId);
+  
+  // Crear la carpeta dentro de la carpeta padre
+  const newFolder = parentFolder.createFolder(folderName);
+  
+  Logger.log('Carpeta creada: ' + newFolder.getName());
+  return `Carpeta "${folderName}" creada exitosamente.`;
+}
